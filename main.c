@@ -83,12 +83,5 @@ int main(void)
     }
 
     printf("Done!\n");
-
-    // pid_t child = wait(&rc);
-    // printf("Child %d ended with RC of %d which is %s\n", child, rc, strerror(rc));
-
-    // Unix Domain Socket Heartbeat?
-    //
-
     return 0;
 }
