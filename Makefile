@@ -5,6 +5,7 @@ clean: pm
 	rm -f pm
 
 install_deno:
+	sudo apt-get install unzip
 	curl -fsSL https://deno.land/x/install/install.sh | sh
 
 web: 
