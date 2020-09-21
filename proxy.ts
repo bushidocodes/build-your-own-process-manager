@@ -16,31 +16,37 @@ let servers = [8080, 8081, 8082];
 
 for await (const request of server) {
   let text: string | Uint8Array = "";
-  console.log(request.url);
+  console.log(`GET localhost:${port}${request.url}`);
 
+  let target_idx = Math.floor(Math.random() * servers.length);
   while (true) {
-    let port = servers[Math.floor(Math.random() * servers.length)];
+    target_idx = (target_idx + 1) % servers.length;
+    let target_port = servers[target_idx];
     try {
-      let resp = await fetch(`http://localhost:${port}${request.url}`);
-      if (request.url.endsWith(".png")) {
-        text = new Uint8Array(await resp.arrayBuffer());
-        const headers = new Headers();
-        headers.set("content-type", "image/png");
-
+      let resp = await fetch(`http://localhost:${target_port}${request.url}`);
+      const headers = new Headers();
+      if (resp.status == 404) {
+        request.respond({ status: 404 });
+        break;
+      } else if (resp.status == 200) {
+        if (request.url.endsWith(".png")) {
+          text = new Uint8Array(await resp.arrayBuffer());
+          headers.set("content-type", "image/png");
+        } else if (request.url.endsWith(".css")) {
+          text = await (await resp.blob()).text();
+          headers.set("content-type", "text/css");
+        } else {
+          text = await resp.text();
+        }
+        console.log(`PROXY to localhost:${target_port}${request.url} SUCCESS`);
         request.respond({ status: 200, body: text, headers });
-      } else if (request.url.endsWith(".css")) {
-        text = await (await resp.blob()).text();
-        const headers = new Headers();
-        headers.set("content-type", "text/css");
-
-        request.respond({ status: 200, body: text, headers });
+        break;
       } else {
-        text = await resp.text();
-        request.respond({ status: 200, body: text });
+        console.log(`Unexpected Status: ${resp.status}`);
       }
-      break;
     } catch (err) {
-      console.error(err);
+      console.log(`PROXY to localhost:${target_port}${request.url} FAIL`);
+      // console.error(err);
     }
   }
 }
