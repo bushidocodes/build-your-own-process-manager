@@ -6,6 +6,7 @@
  */
 const proxyPort = 1337;
 const workers = [8080, 8081, 8082];
+const BACKEND_TIMEOUT_MS = 500;
 
 console.log(`HTTP proxy running.  Access it at:  http://localhost:${proxyPort}/`);
 
@@ -18,7 +19,10 @@ Deno.serve({ hostname: "0.0.0.0", port: proxyPort }, async (request: Request) =>
     targetIdx = (targetIdx + 1) % workers.length;
     const targetPort = workers[targetIdx];
     try {
-      const resp = await fetch(`http://localhost:${targetPort}${pathname}`);
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), BACKEND_TIMEOUT_MS);
+      const resp = await fetch(`http://localhost:${targetPort}${pathname}`, { signal: ac.signal });
+      clearTimeout(timer);
       if (resp.status === 404) {
         return new Response(null, { status: 404 });
       }
