@@ -1,52 +1,36 @@
 /**
  * proxy.ts
  *
- * Accepts connections at localhost:1337 and reverse proxies to a random endpoint from a pool of worker
+ * Accepts connections at localhost:1337 and reverse proxies to a random endpoint from a pool of workers
  * at localhost:8080, localhost:8081, and localhost:8082
  */
-import { serve } from "https://deno.land/std@0.70.0/http/server.ts";
+const proxyPort = 1337;
+const workers = [8080, 8081, 8082];
 
-let port = 1337;
-const server = serve({ hostname: "0.0.0.0", port });
-console.log(
-  `HTTP webserver running.  Access it at:  http://localhost:${port}/`
-);
+console.log(`HTTP proxy running.  Access it at:  http://localhost:${proxyPort}/`);
 
-let servers = [8080, 8081, 8082];
+Deno.serve({ hostname: "0.0.0.0", port: proxyPort }, async (request: Request) => {
+  const pathname = new URL(request.url).pathname;
+  console.log(`GET localhost:${proxyPort}${pathname}`);
 
-for await (const request of server) {
-  let text: string | Uint8Array = "";
-  console.log(`GET localhost:${port}${request.url}`);
-
-  let target_idx = Math.floor(Math.random() * servers.length);
-  while (true) {
-    target_idx = (target_idx + 1) % servers.length;
-    let target_port = servers[target_idx];
+  let targetIdx = Math.floor(Math.random() * workers.length);
+  for (let attempt = 0; attempt < workers.length; attempt++) {
+    targetIdx = (targetIdx + 1) % workers.length;
+    const targetPort = workers[targetIdx];
     try {
-      let resp = await fetch(`http://localhost:${target_port}${request.url}`);
-      const headers = new Headers();
-      if (resp.status == 404) {
-        request.respond({ status: 404 });
-        break;
-      } else if (resp.status == 200) {
-        if (request.url.endsWith(".png")) {
-          text = new Uint8Array(await resp.arrayBuffer());
-          headers.set("content-type", "image/png");
-        } else if (request.url.endsWith(".css")) {
-          text = await (await resp.blob()).text();
-          headers.set("content-type", "text/css");
-        } else {
-          text = await resp.text();
-        }
-        console.log(`PROXY to localhost:${target_port}${request.url} SUCCESS`);
-        request.respond({ status: 200, body: text, headers });
-        break;
-      } else {
-        console.log(`Unexpected Status: ${resp.status}`);
+      const resp = await fetch(`http://localhost:${targetPort}${pathname}`);
+      if (resp.status === 404) {
+        return new Response(null, { status: 404 });
       }
-    } catch (err) {
-      console.log(`PROXY to localhost:${target_port}${request.url} FAIL`);
-      // console.error(err);
+      if (resp.status === 200) {
+        console.log(`PROXY to localhost:${targetPort}${pathname} SUCCESS`);
+        return new Response(resp.body, { status: 200, headers: resp.headers });
+      }
+      console.log(`Unexpected status: ${resp.status}`);
+    } catch {
+      console.log(`PROXY to localhost:${targetPort}${pathname} FAIL`);
     }
   }
-}
+
+  return new Response("Bad Gateway", { status: 502 });
+});
