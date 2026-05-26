@@ -60,7 +60,8 @@ int main(int argc, char *argv[])
         while ((died = waitpid(-1, &status, WNOHANG)) > 0) {
             for (int i = 0; i < num_workers; i++) {
                 if (pids[i] == died) {
-                    printf("[pm] worker %d (pid=%d) exited — respawning\n", i, died);
+                    printf("[pm] worker %d (pid=%d) exited — respawning in 1s\n", i, died);
+                    sleep(1); /* backoff: prevents thrash if worker fails immediately */
                     spawn(i);
                     break;
                 }
