@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "web": "deno run --allow-read --allow-net web.ts 8081",
-    "proxy": "deno run --allow-net proxy.ts"
+    "web": "deno run --allow-read --allow-net --allow-env web.ts 8081",
+    "proxy": "deno run --allow-net --allow-env proxy.ts"
   }
 }

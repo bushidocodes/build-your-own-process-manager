@@ -4,8 +4,10 @@
  * Accepts connections at localhost:1337 and reverse proxies to a random endpoint from a pool of workers
  * at localhost:8080, localhost:8081, and localhost:8082
  */
-const proxyPort = 1337;
-const workers = [8080, 8081, 8082];
+const proxyPort: number = parseInt(Deno.env.get("PROXY_PORT") ?? "1337", 10);
+const workers: number[] = (Deno.env.get("WORKER_PORTS") ?? "8080,8081,8082")
+  .split(",")
+  .map((p) => parseInt(p.trim(), 10));
 const BACKEND_TIMEOUT_MS = 500;
 
 console.log(`HTTP proxy running.  Access it at:  http://localhost:${proxyPort}/`);
