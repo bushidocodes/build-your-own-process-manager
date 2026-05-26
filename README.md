@@ -227,3 +227,23 @@ And then open `~/.bash_profile` and remove the following lines:
 export DENO_INSTALL="$HOME/.deno"
 export PATH="$PATH:$DENO_INSTALL/bin"
 ```
+
+## Reference Solution
+
+A reference implementation of `main.c` is provided in encoded form under `solution/main.c.b64`.
+
+**Only look at this after you have made a genuine attempt at the lab.**
+
+To decode and inspect it:
+
+```sh
+base64 -d solution/main.c.b64 > /tmp/solution.c
+cat /tmp/solution.c
+```
+
+To decode and build it directly:
+
+```sh
+base64 -d solution/main.c.b64 > main.c
+make build
+```
