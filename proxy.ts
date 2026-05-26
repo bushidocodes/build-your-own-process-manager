@@ -14,33 +14,45 @@ const BACKEND_TIMEOUT_MS = 500;
 
 logger.info("HTTP proxy starting", { port: proxyPort, workers });
 
-Deno.serve({ hostname: "0.0.0.0", port: proxyPort }, async (request: Request) => {
-  const pathname = new URL(request.url).pathname;
-  logger.debug("request", { pathname });
+Deno.serve(
+  { hostname: "0.0.0.0", port: proxyPort },
+  async (request: Request) => {
+    const pathname = new URL(request.url).pathname;
+    logger.debug("request", { pathname });
 
-  let targetIdx = Math.floor(Math.random() * workers.length);
-  for (let attempt = 0; attempt < workers.length; attempt++) {
-    targetIdx = (targetIdx + 1) % workers.length;
-    const targetPort = workers[targetIdx];
-    try {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), BACKEND_TIMEOUT_MS);
-      const resp = await fetch(`http://localhost:${targetPort}${pathname}`, { signal: ac.signal });
-      clearTimeout(timer);
-      if (resp.status === 404) {
-        logger.warn("upstream 404", { targetPort, pathname });
-        return new Response(null, { status: 404 });
+    let targetIdx = Math.floor(Math.random() * workers.length);
+    for (let attempt = 0; attempt < workers.length; attempt++) {
+      targetIdx = (targetIdx + 1) % workers.length;
+      const targetPort = workers[targetIdx];
+      try {
+        const ac = new AbortController();
+        const timer = setTimeout(() => ac.abort(), BACKEND_TIMEOUT_MS);
+        const resp = await fetch(`http://localhost:${targetPort}${pathname}`, {
+          signal: ac.signal,
+        });
+        clearTimeout(timer);
+        if (resp.status === 404) {
+          logger.warn("upstream 404", { targetPort, pathname });
+          return new Response(null, { status: 404 });
+        }
+        if (resp.status === 200) {
+          logger.info("proxy success", { targetPort, pathname });
+          return new Response(resp.body, {
+            status: 200,
+            headers: resp.headers,
+          });
+        }
+        logger.warn("unexpected upstream status", {
+          targetPort,
+          pathname,
+          status: resp.status,
+        });
+      } catch {
+        logger.warn("backend unreachable", { targetPort, pathname });
       }
-      if (resp.status === 200) {
-        logger.info("proxy success", { targetPort, pathname });
-        return new Response(resp.body, { status: 200, headers: resp.headers });
-      }
-      logger.warn("unexpected upstream status", { targetPort, pathname, status: resp.status });
-    } catch {
-      logger.warn("backend unreachable", { targetPort, pathname });
     }
-  }
 
-  logger.error("bad gateway — all backends failed", { pathname });
-  return new Response("Bad Gateway", { status: 502 });
-});
+    logger.error("bad gateway — all backends failed", { pathname });
+    return new Response("Bad Gateway", { status: 502 });
+  },
+);

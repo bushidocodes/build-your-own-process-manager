@@ -3,7 +3,10 @@
  */
 import { logger } from "./logger.ts";
 
-const port: number = parseInt(Deno.env.get("PORT") ?? Deno.args[0] ?? "8080", 10);
+const port: number = parseInt(
+  Deno.env.get("PORT") ?? Deno.args[0] ?? "8080",
+  10,
+);
 const chaosRate: number = parseFloat(Deno.env.get("CHAOS_RATE") ?? "0.05");
 const wwwDir = import.meta.dirname + "/www";
 
