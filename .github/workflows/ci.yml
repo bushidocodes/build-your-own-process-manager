@@ -44,11 +44,13 @@ jobs:
       - name: Web server — valid file returns 200, missing returns 404
         run: |
           CHAOS_RATE=0 deno run --allow-read --allow-net --allow-env web.ts 8081 &
+          WEB_PID=$!
           sleep 3
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
           echo "index.html: HTTP $STATUS"; [ "$STATUS" = "200" ] || exit 1
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/notfound)
           echo "notfound:   HTTP $STATUS"; [ "$STATUS" = "404" ] || exit 1
+          kill $WEB_PID; wait $WEB_PID 2>/dev/null || true
 
       - name: Proxy — no backends returns 502 within 5s
         run: |
