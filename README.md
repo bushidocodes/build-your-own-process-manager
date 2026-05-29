@@ -197,8 +197,8 @@ Open this file and notice the following:
    }
    ```
 
-3. If the proxy is successful, a `new Response` is returned. Otherwise, it
-   tries the next port. If all backends fail, a 502 Bad Gateway is returned.
+3. If the proxy is successful, a `new Response` is returned. Otherwise, it tries
+   the next port. If all backends fail, a 502 Bad Gateway is returned.
    ```ts
    return new Response(resp.body, { status: 200, headers: resp.headers });
    ```
