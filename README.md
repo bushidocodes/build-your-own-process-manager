@@ -24,9 +24,9 @@ Should print results similar to the following:
 
 ```
 sean@MANPUTER:~/projects/process-manager$ deno --version
-deno 1.4.1
-v8 8.7.75
-typescript 4.0.2
+deno 2.3.3
+v8 13.1.201.16
+typescript 5.7.2
 ```
 
 Note: You are NOT expected to know TypeScript and you will not modify these
@@ -47,21 +47,23 @@ is written in TypeScript
 
 Open the `web.ts` script, and notice the following:
 
-The port is configurable via an argument to the script, defaulting to 8080 if
-not provided.
+The port is configurable via the `PORT` environment variable or a command-line
+argument, defaulting to 8080 if neither is provided.
 
 ```ts
-let port: number = parseInt(Deno.args[0], 10) || 8080;
+const port: number = parseInt(
+  Deno.env.get("PORT") ?? Deno.args[0] ?? "8080",
+  10,
+);
 ```
 
-The request handler logic takes a random number from 0 to 19, crashing the
-program if it is 0. This gives us our 5% failure rate.
+The request handler crashes with a configurable probability (defaulting to 5%),
+simulating spontaneous failure.
 
 ```ts
-// 5% chance of spontaneous failure, causing server to crash
-if (Math.floor(Math.random() * Math.floor(20)) == 0) {
-  console.log("Chaos Monkey strikes again!");
-  Deno.exit(-1);
+if (Math.random() < chaosRate) {
+  logger.warn("chaos monkey strike", { path });
+  Deno.exit(1);
 }
 ```
 
@@ -70,14 +72,15 @@ looks like.
 
 ```Makefile
 web:
-	deno run --allow-read --allow-net web.ts 8081
+	deno run --allow-read --allow-net --allow-env web.ts 8081
 ```
 
 The Makefile rule `web` tells `deno` to `run` the script `web.ts`, passing
 `8081` as an argument. As we saw above, this is used to set the port the web
-server will serve Gabe's website from. The `--allow-read` and `--allow-net` are
-scoped permissions that allow Deno script to read (but not write) from the
-filesystem and to bind to our network interfaces.
+server will serve Gabe's website from. The `--allow-read`, `--allow-net`, and
+`--allow-env` are scoped permissions that allow the Deno script to read (but not
+write) from the filesystem, bind to network interfaces, and read environment
+variables.
 
 Let's run this.
 
@@ -89,9 +92,8 @@ should yield the following
 
 ```sh
 sean@MANPUTER:~/projects/process-manager$ make web
-deno run --allow-read --allow-net web.ts 8081
-port: 8081
-HTTP webserver running.  Access it at:  http://localhost:8081/
+deno run --allow-read --allow-net --allow-env web.ts 8081
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"HTTP webserver starting","port":8081,"chaosRate":0.05}
 ```
 
 Since you are running from the VSCode terminal, the Remote extensions
@@ -109,14 +111,12 @@ doesn't load properly.
 Go back to your terminal. You should see the following!
 
 ```sh
-<snip>
-gp.png
-index.html
-index.css
-gp.png
-Chaos Monkey strikes again!
-Makefile:11: recipe for target 'web' failed
-make: *** [web] Error 255
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"serve","path":"index.html","status":200}
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"serve","path":"index.css","status":200}
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"serve","path":"gp.png","status":200}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"chaos monkey strike","path":"gp.png"}
+Makefile:8: recipe for target 'web' failed
+make: *** [Makefile:8: web] Error 1
 ```
 
 Note: the Chaos Monkey is the mascot of the discipline software engineering
@@ -143,7 +143,7 @@ Hints:
   runtime. The last element should be NULL. This exact syntax might vary
   depending on the `exec` variant you use
   ```c
-  char *args[] = {"./deno", "run", "--allow-read", "--allow-net", "web.ts", 8081, NULL};
+  char *args[] = {"./deno", "run", "--allow-read", "--allow-net", "--allow-env", "web.ts", "8081", NULL};
   ```
 - If you are printing to console from a child process, you might need to use
   `fflush` to make sure the text is printed before the process terminates
@@ -171,36 +171,36 @@ Enhance your process to spawn a pool of three workers. This allows request to
 automatically fail over to another worker if one fails. That makes the error
 transparent to the client.
 
-We provide a proxy server called `web.ts` to help redirect traffic across your
+We provide a proxy server called `proxy.ts` to help redirect traffic across your
 pool of workers.
 
 Open this file and notice the following:
 
-1. The script is hardcoded to balance between webservers running on 8080, 8081,
-   and 8082. This means that you need to make sure that these URLs are used
-   exactly:
+1. The script defaults to balancing between webservers running on 8080, 8081,
+   and 8082 (configurable via `WORKER_PORTS`). This means that you need to make
+   sure that these ports are used exactly:
 
    ```ts
-   let servers = [8080, 8081, 8082];
+   const workers: number[] = (Deno.env.get("WORKER_PORTS") ?? "8080,8081,8082")
+     .split(",")
+     .map((p) => parseInt(p.trim(), 10));
    ```
 
 2. The proxy round robins between the three web servers
 
    ```ts
-   let target_idx = Math.floor(Math.random() * servers.length);
-   while (true) {
-       target_idx = (target_idx + 1) % servers.length;
-       let target_port = servers[target_idx];
+   let targetIdx = Math.floor(Math.random() * workers.length);
+   for (let attempt = 0; attempt < workers.length; attempt++) {
+       targetIdx = (targetIdx + 1) % workers.length;
+       const targetPort = workers[targetIdx];
        <snip>
    }
    ```
 
-3. If the proxy is successful and `request.respond` is executed, the proxy
-   breaks the loop. Otherwise, it round robins to the next port until
-   successful.
+3. If the proxy is successful, a `new Response` is returned. Otherwise, it
+   tries the next port. If all backends fail, a 502 Bad Gateway is returned.
    ```ts
-   request.respond({ status: 200, body: text, headers });
-   break;
+   return new Response(resp.body, { status: 200, headers: resp.headers });
    ```
 
 You can run the proxy with your process manager.
@@ -215,20 +215,17 @@ to 8081 on each request.
 
 ```sh
 sean@MANPUTER:~/projects/process-manager$ make proxy
-deno run --allow-net proxy.ts
-HTTP webserver running.  Access it at:  http://localhost:1337/
-GET localhost:1337/
-PROXY to localhost:8082/ FAIL
-PROXY to localhost:8080/ FAIL
-PROXY to localhost:8081/ SUCCESS
-GET localhost:1337/index.css
-PROXY to localhost:8082/index.css FAIL
-PROXY to localhost:8080/index.css FAIL
-PROXY to localhost:8081/index.css SUCCESS
-GET localhost:1337/gp.png
-PROXY to localhost:8082/gp.png FAIL
-PROXY to localhost:8080/gp.png FAIL
-PROXY to localhost:8081/gp.png SUCCESS
+deno run --allow-net --allow-env proxy.ts
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"HTTP proxy starting","port":1337,"workers":[8080,8081,8082]}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8082,"pathname":"/"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8080,"pathname":"/"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"proxy success","targetPort":8081,"pathname":"/"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8082,"pathname":"/index.css"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8080,"pathname":"/index.css"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"proxy success","targetPort":8081,"pathname":"/index.css"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8082,"pathname":"/gp.png"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8080,"pathname":"/gp.png"}
+{"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"proxy success","targetPort":8081,"pathname":"/gp.png"}
 ```
 
 You now have all the pieces that you need to enhance your process manager to
