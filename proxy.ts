@@ -22,7 +22,6 @@ Deno.serve(
 
     let targetIdx = Math.floor(Math.random() * workers.length);
     for (let attempt = 0; attempt < workers.length; attempt++) {
-      targetIdx = (targetIdx + 1) % workers.length;
       const targetPort = workers[targetIdx];
       try {
         const ac = new AbortController();
@@ -50,6 +49,7 @@ Deno.serve(
       } catch {
         logger.warn("backend unreachable", { targetPort, pathname });
       }
+      targetIdx = (targetIdx + 1) % workers.length;
     }
 
     logger.error("bad gateway — all backends failed", { pathname });
