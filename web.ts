@@ -1,8 +1,8 @@
 /**
  * webserver.ts
  */
-import { contentType } from "jsr:@std/media-types@^1";
-import { extname } from "jsr:@std/path@^1";
+import { contentType } from "@std/media-types";
+import { extname } from "@std/path";
 import { logger } from "./logger.ts";
 
 const port: number = parseInt(
