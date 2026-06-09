@@ -11,7 +11,7 @@ and the Process APIs presented by POSIX, such as `fork`, `exec`, and `wait`.
 
 ## Install Deno
 
-Run `source install_deno` to install the Deno runtime. This is a
+Run `source install_deno.sh` to install the Deno runtime. This is a
 JavaScript/TypeScript runtime that is evolved from Node.js.
 
 Running the following
