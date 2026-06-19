@@ -10,7 +10,7 @@ jobs:
     name: Type check / lint / format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
@@ -22,7 +22,7 @@ jobs:
     name: C build + solution integrity
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build stub
         run: make build
       - name: Stub runs and prints expected output
@@ -36,7 +36,7 @@ jobs:
     name: Smoke tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
