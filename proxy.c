@@ -129,14 +129,24 @@ int main(void)
 
     srand((unsigned int)(time(NULL) ^ (getpid() << 16)));
 
-    /* Build the "workers":[...] fragment once for the startup log. */
+    /* Build the "workers":[...] fragment once for the startup log. snprintf
+     * returns the length it WOULD have written, so guard every step to keep
+     * the offset in bounds and never let the remaining-size underflow. */
     char workers_json[256];
     {
-        int w = snprintf(workers_json, sizeof(workers_json), "[");
-        for (int i = 0; i < num_workers; i++)
-            w += snprintf(workers_json + w, sizeof(workers_json) - (size_t)w,
-                          "%s%d", i ? "," : "", worker_ports[i]);
-        snprintf(workers_json + w, sizeof(workers_json) - (size_t)w, "]");
+        size_t off = 0;
+        int n = snprintf(workers_json, sizeof(workers_json), "[");
+        if (n > 0 && (size_t)n < sizeof(workers_json))
+            off = (size_t)n;
+        for (int i = 0; i < num_workers; i++) {
+            n = snprintf(workers_json + off, sizeof(workers_json) - off, "%s%d",
+                         i ? "," : "", worker_ports[i]);
+            if (n < 0 || (size_t)n >= sizeof(workers_json) - off)
+                break; /* would overflow; leave the list truncated */
+            off += (size_t)n;
+        }
+        if (off < sizeof(workers_json) - 1)
+            snprintf(workers_json + off, sizeof(workers_json) - off, "]");
     }
     char fields[1408];
     snprintf(fields, sizeof(fields), ",\"port\":%d,\"workers\":%s", proxy_port,
