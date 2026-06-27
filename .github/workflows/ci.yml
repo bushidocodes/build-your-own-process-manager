@@ -9,24 +9,25 @@ permissions:
   contents: read
 
 jobs:
-  deno:
-    name: Type check / lint / format
+  lint:
+    name: Format + strict build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-      - run: deno fmt --check
-      - run: deno lint
-      - run: deno check web.ts proxy.ts logger.ts
+      - name: Check formatting
+        run: clang-format --dry-run --Werror log.c log.h web.c proxy.c
+      - name: Strict compile (warnings as errors)
+        run: |
+          gcc -Wall -Wextra -Werror -std=c11 -pedantic -c log.c   -o /dev/null
+          gcc -Wall -Wextra -Werror -std=c11 -pedantic -c web.c   -o /dev/null
+          gcc -Wall -Wextra -Werror -std=c11 -pedantic -c proxy.c -o /dev/null
 
-  c:
-    name: C build + solution integrity
+  build:
+    name: Build + solution integrity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build stub
+      - name: Build everything (pm, web, proxy)
         run: make build
       - name: Stub runs and prints expected output
         run: |
@@ -40,15 +41,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      - name: Build
+        run: make build
 
       - name: Web server — valid file returns 200, missing returns 404
         run: |
-          CHAOS_RATE=0 deno run --allow-read --allow-net --allow-env web.ts 8081 &
+          CHAOS_RATE=0 ./web 8081 &
           WEB_PID=$!
-          sleep 3
+          sleep 1
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
           echo "index.html: HTTP $STATUS"; [ "$STATUS" = "200" ] || exit 1
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/notfound)
@@ -57,11 +57,26 @@ jobs:
 
       - name: Proxy — no backends returns 502 within 5s
         run: |
-          deno run --allow-net --allow-env proxy.ts &
-          sleep 2
+          ./proxy &
+          PROXY_PID=$!
+          sleep 1
           START=$SECONDS
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:1337/)
           ELAPSED=$(( SECONDS - START ))
           echo "HTTP $STATUS in ~${ELAPSED}s"
           [ "$STATUS" = "502" ] || { echo "Expected 502, got $STATUS"; exit 1; }
           [ "$ELAPSED" -lt 5 ]  || { echo "Took too long: ${ELAPSED}s";  exit 1; }
+          kill $PROXY_PID 2>/dev/null || true
+
+      - name: Proxy — forwards to a live worker (200) and relays 404
+        run: |
+          CHAOS_RATE=0 ./web 8081 &
+          WEB_PID=$!
+          ./proxy &
+          PROXY_PID=$!
+          sleep 1
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:1337/)
+          echo "proxied /:        HTTP $STATUS"; [ "$STATUS" = "200" ] || exit 1
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:1337/notfound)
+          echo "proxied /notfound: HTTP $STATUS"; [ "$STATUS" = "404" ] || exit 1
+          kill $WEB_PID $PROXY_PID 2>/dev/null || true

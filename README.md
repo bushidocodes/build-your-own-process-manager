@@ -9,29 +9,32 @@
 Today, you are going to implement your own process manager from scratch using C
 and the Process APIs presented by POSIX, such as `fork`, `exec`, and `wait`.
 
-## Install Deno
+## Prerequisites
 
-Run `source install_deno.sh` to install the Deno runtime. This is a
-JavaScript/TypeScript runtime that is evolved from Node.js.
-
-Running the following
+This lab targets a POSIX environment (Linux, WSL, or macOS). You only need a C
+compiler and `make`:
 
 ```sh
-deno --version
+gcc --version
+make --version
 ```
 
-Should print results similar to the following:
+There is no runtime to install — the web server and proxy you will manage are
+small C programs that build alongside your process manager. Build everything
+with:
 
-```
-sean@MANPUTER:~/projects/process-manager$ deno --version
-deno 2.3.3
-v8 13.1.201.16
-typescript 5.7.2
+```sh
+make build
 ```
 
-Note: You are NOT expected to know TypeScript and you will not modify these
-scripts. However, the syntax is similar to Java, so you likely can get a rough
-idea what they do
+This compiles three programs:
+
+- `pm` — the process manager you implement in `main.c`
+- `web` — the static web server (provided, in `web.c`)
+- `proxy` — the reverse proxy (provided, in `proxy.c`)
+
+Note: You are NOT expected to modify `web.c` or `proxy.c`. Skim them to get a
+rough idea of what they do.
 
 ## Investigating the Problematic App
 
@@ -43,65 +46,61 @@ Open the `www` directory and look at the contents. This contains the HTML, CSS,
 and image for Gabe's site.
 
 These static assets need to be served by a web server, and the buggy web server
-is written in TypeScript
+is written in C in `web.c`.
 
-Open the `web.ts` script, and notice the following:
+Open the `web.c` script, and notice the following:
 
 The port is configurable via the `PORT` environment variable or a command-line
 argument, defaulting to 8080 if neither is provided.
 
-```ts
-const port: number = parseInt(
-  Deno.env.get("PORT") ?? Deno.args[0] ?? "8080",
-  10,
-);
+```c
+const char *port_env = getenv("PORT");
+int port = port_env ? atoi(port_env) : argc > 1 ? atoi(argv[1]) : 8080;
 ```
 
-The request handler crashes with a configurable probability (defaulting to 5%),
-simulating spontaneous failure.
+The request handler crashes with a configurable probability (defaulting to 5%,
+via the `CHAOS_RATE` environment variable), simulating spontaneous failure.
 
-```ts
-if (Math.random() < chaosRate) {
-  logger.warn("chaos monkey strike", { path });
-  Deno.exit(1);
+```c
+if ((double)rand() / RAND_MAX < chaos_rate) {
+    log_emit(LOG_WARN, "chaos monkey strike", fields);
+    exit(1);
 }
 ```
 
-Let's first take a look at the Makefile to see what executing a Deno script
-looks like.
+Let's first take a look at the Makefile to see how the web server is run.
 
 ```Makefile
-web:
-	deno run --allow-read --allow-net --allow-env web.ts 8081
+run-web: web
+	./web 8081
 ```
 
-The Makefile rule `web` tells `deno` to `run` the script `web.ts`, passing
-`8081` as an argument. As we saw above, this is used to set the port the web
-server will serve Gabe's website from. The `--allow-read`, `--allow-net`, and
-`--allow-env` are scoped permissions that allow the Deno script to read (but not
-write) from the filesystem, bind to network interfaces, and read environment
-variables.
+The Makefile rule `run-web` builds the `web` program and runs it, passing `8081`
+as an argument. As we saw above, this sets the port the web server will serve
+Gabe's website from.
 
 Let's run this.
 
 ```sh
-make web
+make run-web
 ```
 
 should yield the following
 
 ```sh
-sean@MANPUTER:~/projects/process-manager$ make web
-deno run --allow-read --allow-net --allow-env web.ts 8081
+sean@MANPUTER:~/projects/process-manager$ make run-web
+gcc -Wall -Wextra -o web web.c log.c
+./web 8081
 {"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"HTTP webserver starting","port":8081,"chaosRate":0.05}
 ```
 
 Since you are running from the VSCode terminal, the Remote extensions
 automatically proxy from the WSL backend / Multipass VM. This means that you can
 hold down control and left click on the URL in the console as if it were a
-hyperlink, and you'll open Gabe's webpage in your default browser.
+hyperlink, and you'll open Gabe's webpage in your default browser. (Or just open
+`http://localhost:8081/` yourself.)
 
-_Note: If you are running WSL, the actual port that the link open may be
+_Note: If you are running WSL, the actual port that the link opens may be
 slightly different. Be sure to click the link in the console rather than
 copy/pasting text into your URL bar._
 
@@ -115,9 +114,9 @@ Go back to your terminal. You should see the following!
 {"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"serve","path":"index.css","status":200}
 {"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"serve","path":"gp.png","status":200}
 {"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"chaos monkey strike","path":"gp.png"}
-Makefile:8: recipe for target 'web' failed
-make: *** [Makefile:8: web] Error 1
 ```
+
+The `web` process exits, and the website is down until something restarts it.
 
 Note: the Chaos Monkey is the mascot of the discipline software engineering
 [Chaos Engineering](https://en.wikipedia.org/wiki/Chaos_engineering). I suggest
@@ -125,11 +124,11 @@ saving this link and reading up on this later.
 
 ## Objective 1: Auto-respawn
 
-The first objective is to create a process manager that launches the Deno web
-server and relaunches it whenever the web server exits!
+The first objective is to create a process manager that launches the web server
+and relaunches it whenever the web server exits!
 
-You should implement this in `main.c`. The program should invoke the deno script
-just as in the `web` rule in the Makefile.
+You should implement this in `main.c`. The program should invoke the `web`
+program just as in the `run-web` rule in the Makefile.
 
 Running `make build` will compile your process manager.
 
@@ -139,11 +138,11 @@ Hints:
 
 - Read the manual pages for `fork`, `exec`, and `wait`
 - The arguments probably need to be split into an array of NULL-terminated
-  tokens. The first element should be the relative path used to call the
-  runtime. The last element should be NULL. This exact syntax might vary
+  tokens. The first element should be the relative path used to launch the
+  program. The last element should be NULL. This exact syntax might vary
   depending on the `exec` variant you use
   ```c
-  char *args[] = {"./deno", "run", "--allow-read", "--allow-net", "--allow-env", "web.ts", "8081", NULL};
+  char *args[] = {"./web", "8081", NULL};
   ```
 - If you are printing to console from a child process, you might need to use
   `fflush` to make sure the text is printed before the process terminates
@@ -152,7 +151,7 @@ Hints:
 
 ```
 __________________________
-|       deno script      |
+|       web server       |
 |         :8081          |
 ''''''''''''''''''''''''''
 __________________________
@@ -162,60 +161,58 @@ __________________________
 
 Success Criteria: If the chaos monkey strikes and your process terminates, your
 process manager should automatically restart the process. This should be at the
-same IP address, such that once can refresh hitting the website over and over.
+same IP address, such that one can refresh hitting the website over and over.
 Specific requests might sporadically fail, but the website is never fully down.
 
 ## Objective 2: Pool of 3 Workers
 
-Enhance your process to spawn a pool of three workers. This allows request to
+Enhance your process to spawn a pool of three workers. This allows requests to
 automatically fail over to another worker if one fails. That makes the error
 transparent to the client.
 
-We provide a proxy server called `proxy.ts` to help redirect traffic across your
+We provide a proxy server called `proxy.c` to help redirect traffic across your
 pool of workers.
 
 Open this file and notice the following:
 
-1. The script defaults to balancing between webservers running on 8080, 8081,
+1. The proxy defaults to balancing between web servers running on 8080, 8081,
    and 8082 (configurable via `WORKER_PORTS`). This means that you need to make
    sure that these ports are used exactly:
 
-   ```ts
-   const workers: number[] = (Deno.env.get("WORKER_PORTS") ?? "8080,8081,8082")
-     .split(",")
-     .map((p) => parseInt(p.trim(), 10));
+   ```c
+   parse_workers(workers_env ? workers_env : "8080,8081,8082");
    ```
 
-2. The proxy round robins between the three web servers
+2. The proxy round robins between the three web servers, starting from a random
+   one
 
-   ```ts
-   let targetIdx = Math.floor(Math.random() * workers.length);
-   for (let attempt = 0; attempt < workers.length; attempt++) {
-       targetIdx = (targetIdx + 1) % workers.length;
-       const targetPort = workers[targetIdx];
-       <snip>
+   ```c
+   int idx = rand() % num_workers;
+   for (int attempt = 0; attempt < num_workers && !served; attempt++) {
+       int target_port = worker_ports[idx];
+       idx = (idx + 1) % num_workers;
+       /* ...try this worker... */
    }
    ```
 
-3. If the proxy is successful, a `new Response` is returned. Otherwise, it tries
-   the next port. If all backends fail, a 502 Bad Gateway is returned.
-   ```ts
-   return new Response(resp.body, { status: 200, headers: resp.headers });
-   ```
+3. If a worker responds with 200, the response is relayed back to the client.
+   Otherwise, it tries the next port. If all backends fail, a 502 Bad Gateway is
+   returned.
 
-You can run the proxy with your process manager.
+You can run the proxy alongside your process manager.
 
 Run `make run` to start your process manager.
 
-Open a second tab and run `make proxy`.
+Open a second tab and run `make run-proxy`.
 
-Notice that the proxy attempt to load balance between ports 8080, 8081, and
+Notice that the proxy attempts to load balance between ports 8080, 8081, and
 8082, but because you're only running a server on 8081, it ends up failing over
 to 8081 on each request.
 
 ```sh
-sean@MANPUTER:~/projects/process-manager$ make proxy
-deno run --allow-net --allow-env proxy.ts
+sean@MANPUTER:~/projects/process-manager$ make run-proxy
+gcc -Wall -Wextra -o proxy proxy.c log.c
+./proxy
 {"ts":"2026-01-01T12:00:00.000Z","level":"INFO","msg":"HTTP proxy starting","port":1337,"workers":[8080,8081,8082]}
 {"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8082,"pathname":"/"}
 {"ts":"2026-01-01T12:00:00.000Z","level":"WARN","msg":"backend unreachable","targetPort":8080,"pathname":"/"}
@@ -239,7 +236,7 @@ spawn and monitor a pool of workers.
                        |
         v--------------v---------------v
 _______________ _______________ _______________
-| deno script | | deno script | | deno script |
+| web server  | | web server  | | web server  |
 |    :8080    | |    :8081    | |    :8082    |
 ''''''''''''''' ''''''''''''''' '''''''''''''''
 _______________________________________________
@@ -249,8 +246,8 @@ _______________________________________________
 
 Hints:
 
-- You need a way to know which the IP address of the node that failed. This
-  probably needs to be maintained in some sort of mapping from pid to IP
+- You need a way to know the port of the node that failed. This probably needs
+  to be maintained in some sort of mapping from pid to port.
 - You thus need to know the pid of the child process that failed. One of the
   members of the `wait` family of APIs is better for this than others.
 - Is the `wait` call you chose blocking or nonblocking? Which should it be?
@@ -258,15 +255,10 @@ Hints:
 
 ## Cleanup
 
-If you want to remove deno, run the following script
+There is nothing to uninstall. To remove the compiled binaries, run:
 
-`./remove_deno.sh`
-
-And then open `~/.bash_profile` and remove the following lines:
-
-```bash
-export DENO_INSTALL="$HOME/.deno"
-export PATH="$PATH:$DENO_INSTALL/bin"
+```sh
+make clean
 ```
 
 ## Reference Solution
