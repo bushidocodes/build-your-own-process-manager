@@ -80,3 +80,29 @@ jobs:
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:1337/notfound)
           echo "proxied /notfound: HTTP $STATUS"; [ "$STATUS" = "404" ] || exit 1
           kill $WEB_PID $PROXY_PID 2>/dev/null || true
+
+
+  sanitizers:
+    name: ASan + UBSan smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build web/proxy/pm with ASan+UBSan
+        env:
+          CC: clang
+          CFLAGS: -O1 -g -Wall -Wextra -std=c11 -fsanitize=address,undefined -fno-omit-frame-pointer
+          LDFLAGS: -fsanitize=address,undefined
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y clang
+          make clean || true
+          make build
+      - name: Web server smoke under sanitizers
+        run: |
+          CHAOS_RATE=0 ./web 8081 &
+          WEB_PID=$!
+          sleep 1
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
+          echo "index.html: HTTP $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
+          kill $WEB_PID 2>/dev/null || true
+          wait $WEB_PID 2>/dev/null || true
